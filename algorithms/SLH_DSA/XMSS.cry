@@ -1,0 +1,68 @@
+/*
+ * Description: This module provides the XMSS signature used by SLH-DSA [FIPS-205
+ * Section 6], a Merkle tree over WOTS+ public keys.
+ */
+
+module algorithms::SLH_DSA::XMSS where
+
+import algorithms::SLH_DSA::Address
+import algorithms::SLH_DSA::HashesShake as Hash where
+  type n = _n
+  type m = _m
+import algorithms::SLH_DSA::WOTS as W where
+  type n = _n
+  type m = _m
+
+parameter
+
+  type n : #
+  type constraint (fin n, n >= 16, n <= 32)
+
+  type m : #
+  type constraint (fin m, m >= 1)
+
+  type hp : #
+  type constraint (fin hp, hp >= 1, hp <= 20)
+
+type _n = n
+type _m = m
+
+type NBytes = [n][8]
+type WLen = 2 * n + 3
+type Leaves = 2 ^^ hp
+type IdxW = 32
+
+type XmssSig = { wots : [WLen]NBytes, auth : [hp]NBytes }
+
+ixs : {len} (fin len) => [len][IdxW]
+ixs = take [0 ...]
+
+xmssLevels : NBytes -> NBytes -> ADRS -> [hp + 1][Leaves]NBytes
+xmssLevels skSeed pkSeed adrs = ls
+  where
+    leaves = [ W::wots_PKgen skSeed pkSeed (setKeyPairAddress (setTypeAndClear adrs WOTS_HASH) leaf)
+             | leaf <- ixs`{Leaves} ]
+    ls = [leaves] # [ combine (ls @ lz) (lz + 1) | lz <- ixs`{hp} ]
+    combine prev lz =
+      [ Hash::H pkSeed (setTreeIndex (setTreeHeight (setTypeAndClear adrs TREE) lz) mm)
+                (prev @ ((2 * mm) && mask) # prev @ ((2 * mm + 1) && mask))
+      | mm <- ixs`{Leaves} ]
+      where mask = (`Leaves - 1) : [IdxW]
+
+xmssRoot : NBytes -> NBytes -> ADRS -> NBytes
+xmssRoot skSeed pkSeed adrs = (xmssLevels skSeed pkSeed adrs) @ (`hp : [IdxW]) @ (0 : [IdxW])
+
+xmssSign : NBytes -> NBytes -> NBytes -> ADRS -> [IdxW] -> XmssSig
+xmssSign msg skSeed pkSeed adrs idx =
+  { wots = W::wots_sign msg skSeed pkSeed (setKeyPairAddress (setTypeAndClear adrs WOTS_HASH) idx)
+  , auth = [ (xmssLevels skSeed pkSeed adrs) @ j @ ((idx >> j) ^ 1) | j <- ixs`{hp} ] }
+
+xmssPkFromSig : [IdxW] -> XmssSig -> NBytes -> NBytes -> ADRS -> NBytes
+xmssPkFromSig idx sig msg pkSeed adrs = node
+  where
+    pk0 = W::wots_PKFromSig sig.wots msg pkSeed (setKeyPairAddress (setTypeAndClear adrs WOTS_HASH) idx)
+    (node, _) = foldl step (pk0, idx) (zip (ixs`{hp}) sig.auth)
+    step (nd, ti) (j, authj) =
+      if ((idx >> j) && 1) == (0 : [IdxW])
+        then (Hash::H pkSeed (setTreeIndex (setTreeHeight (setTypeAndClear adrs TREE) (j + 1)) (ti >> 1)) (nd # authj), ti >> 1)
+        else (Hash::H pkSeed (setTreeIndex (setTreeHeight (setTypeAndClear adrs TREE) (j + 1)) ((ti - 1) >> 1)) (authj # nd), (ti - 1) >> 1)

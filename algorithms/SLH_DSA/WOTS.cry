@@ -1,0 +1,89 @@
+/*
+ * Description: This module provides the WOTS+ one time signature used by SLH-DSA
+ * [FIPS-205 Section 5]. The Winternitz parameter is 16, so lg_w is 4
+ * and len2 is 3 for every SLH-DSA parameter set.
+ */
+
+module algorithms::SLH_DSA::WOTS where
+
+import algorithms::SLH_DSA::Address
+import algorithms::SLH_DSA::HashesShake as Hash where
+  type n = _n
+  type m = _m
+
+parameter
+
+  type n : #
+  type constraint (fin n, n >= 16, n <= 32)
+
+  type m : #
+  type constraint (fin m, m >= 1)
+
+type _n = n
+type _m = m
+
+type w = 16
+
+type lg_w = 4
+
+type len1 = 2 * n
+
+type len2 = 3
+
+type len = len1 + len2
+
+type NBytes = [n][8]
+
+chain : NBytes -> [32] -> [32] -> NBytes -> ADRS -> NBytes
+chain x i s pkSeed adrs = vs @ s
+  where
+    vs = [x] # [ Hash::F pkSeed (setHashAddress adrs (i + j)) v
+               | v <- vs
+               | j <- [0 .. (w - 2)] ]
+
+private
+  msgDigits : NBytes -> [len1][lg_w]
+  msgDigits msg = split (join msg)
+
+  checksumDigits : [len1][lg_w] -> [len2][lg_w]
+  checksumDigits ds = take`{len2} (split shifted)
+    where
+      csum : [32]
+      csum = sum [ (`w - 1) - (zext d) | d <- ds ]
+
+      shifted = drop`{16} (csum << 4) : [16]
+
+  allDigits : NBytes -> [len][lg_w]
+  allDigits msg = ds # checksumDigits ds
+    where ds = msgDigits msg
+
+wots_PKgen : NBytes -> NBytes -> ADRS -> NBytes
+wots_PKgen skSeed pkSeed adrs = pk
+  where
+    skAdrs0 = setKeyPairAddress (setTypeAndClear adrs WOTS_PRF) (getKeyPairAddress adrs)
+    tmp = [ chain sk 0 (`w - 1) pkSeed (setChainAddress adrs i)
+          | i <- [0 .. (len - 1)]
+          | sk <- sks ]
+    sks = [ Hash::PRF pkSeed skSeed (setChainAddress skAdrs0 i) | i <- [0 .. (len - 1)] ]
+    wotspkAdrs = setKeyPairAddress (setTypeAndClear adrs WOTS_PK) (getKeyPairAddress adrs)
+    pk = Hash::T_l pkSeed wotspkAdrs (join tmp)
+
+wots_sign : NBytes -> NBytes -> NBytes -> ADRS -> [len]NBytes
+wots_sign msg skSeed pkSeed adrs = sig
+  where
+    skAdrs0 = setKeyPairAddress (setTypeAndClear adrs WOTS_PRF) (getKeyPairAddress adrs)
+    sks = [ Hash::PRF pkSeed skSeed (setChainAddress skAdrs0 i) | i <- [0 .. (len - 1)] ]
+    sig = [ chain sk 0 (zext d) pkSeed (setChainAddress adrs i)
+          | i <- [0 .. (len - 1)]
+          | sk <- sks
+          | d <- allDigits msg ]
+
+wots_PKFromSig : [len]NBytes -> NBytes -> NBytes -> ADRS -> NBytes
+wots_PKFromSig sig msg pkSeed adrs = pk
+  where
+    tmp = [ chain s (zext d) ((`w - 1) - (zext d)) pkSeed (setChainAddress adrs i)
+          | i <- [0 .. (len - 1)]
+          | s <- sig
+          | d <- allDigits msg ]
+    wotspkAdrs = setKeyPairAddress (setTypeAndClear adrs WOTS_PK) (getKeyPairAddress adrs)
+    pk = Hash::T_l pkSeed wotspkAdrs (join tmp)

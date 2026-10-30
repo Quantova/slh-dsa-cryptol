@@ -1,0 +1,45 @@
+/*
+ * Description: This module provides a Cryptol specification for the SLH-DSA
+ * hash functions instantiated with SHAKE [FIPS-205 Section 11.2].
+ * Each function is SHAKE256 over a fixed input ordering.
+ */
+
+module algorithms::SLH_DSA::HashesShake where
+
+import algorithms::SHAKE::Main (SHAKE256)
+
+parameter
+
+  type n : #
+  type constraint (fin n, n >= 16)
+
+  type m : #
+  type constraint (fin m, m >= 1)
+
+type ADRS = [32][8]
+
+type NBytes = [n][8]
+
+type NOut = [n][8]
+
+private
+  shake : {out, in} (fin out, fin in) => [in][8] -> [out][8]
+  shake bytes = split (SHAKE256`{out * 8} (join bytes))
+
+PRF : NBytes -> NBytes -> ADRS -> NOut
+PRF pkSeed skSeed adrs = shake (pkSeed # adrs # skSeed)
+
+PRF_msg : {msg} (fin msg) => NBytes -> NBytes -> [msg][8] -> NOut
+PRF_msg skPrf optRand msg = shake (skPrf # optRand # msg)
+
+H_msg : {msg} (fin msg) => NBytes -> NBytes -> NBytes -> [msg][8] -> [m][8]
+H_msg r pkSeed pkRoot msg = shake (r # pkSeed # pkRoot # msg)
+
+F : NBytes -> ADRS -> NBytes -> NOut
+F pkSeed adrs m1 = shake (pkSeed # adrs # m1)
+
+H : NBytes -> ADRS -> [2 * n][8] -> NOut
+H pkSeed adrs m2 = shake (pkSeed # adrs # m2)
+
+T_l : {l} (fin l) => NBytes -> ADRS -> [l * n][8] -> NOut
+T_l pkSeed adrs ml = shake (pkSeed # adrs # ml)

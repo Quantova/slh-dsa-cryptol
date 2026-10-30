@@ -1,0 +1,50 @@
+/*
+ * Description: This module provides the SLH-DSA address structure ADRS and its
+ * member functions [FIPS-205 Section 4.2 and Section 4.3].
+ */
+
+module algorithms::SLH_DSA::Address where
+
+type ADRS = [32][8]
+
+WOTS_HASH  = 0 : [32]
+WOTS_PK    = 1 : [32]
+TREE       = 2 : [32]
+FORS_TREE  = 3 : [32]
+FORS_ROOTS = 4 : [32]
+WOTS_PRF   = 5 : [32]
+FORS_PRF   = 6 : [32]
+
+private
+  word : [32] -> [4][8]
+  word x = split x
+
+setLayerAddress : ADRS -> [32] -> ADRS
+setLayerAddress adrs l = word l # drop`{4} adrs
+
+setTreeAddress : ADRS -> [96] -> ADRS
+setTreeAddress adrs t = take`{4} adrs # split t # drop`{16} adrs
+
+setTypeAndClear : ADRS -> [32] -> ADRS
+setTypeAndClear adrs y = take`{16} adrs # word y # (zero : [12][8])
+
+setKeyPairAddress : ADRS -> [32] -> ADRS
+setKeyPairAddress adrs i = take`{20} adrs # word i # drop`{24} adrs
+
+getKeyPairAddress : ADRS -> [32]
+getKeyPairAddress adrs = join (take`{4} (drop`{20} adrs))
+
+setChainAddress : ADRS -> [32] -> ADRS
+setChainAddress adrs i = take`{24} adrs # word i # drop`{28} adrs
+
+setTreeHeight : ADRS -> [32] -> ADRS
+setTreeHeight = setChainAddress
+
+setHashAddress : ADRS -> [32] -> ADRS
+setHashAddress adrs i = take`{28} adrs # word i
+
+setTreeIndex : ADRS -> [32] -> ADRS
+setTreeIndex = setHashAddress
+
+getTreeIndex : ADRS -> [32]
+getTreeIndex adrs = join (drop`{28} adrs)
